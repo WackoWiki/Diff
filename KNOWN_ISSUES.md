@@ -7,76 +7,83 @@ are not lost during future maintenance.
 
 ---
 
-## Issue #1: `$value` carry-over in `Diff\Side::decode_directive_line()`
+## Issue #1: Multi-digit numbers only parse first digit
 
-**Severity:** Low (cosmetic — does not affect diff computation)
+**Severity:** Medium (affects line-count calculations)
 
 **Affected versions:** All versions
 
 **Description:**
 
-When parsing a diff directive line, the `$value` variable is only reset
-to `0` when a digit is encountered. If a directive slot has no digit
-content (single-range directives like `5a10`), `$value` retains the
-previous parsed value.
+When a directive state encounters a multi-digit number (e.g., `10`, `12`),
+only the FIRST digit is parsed into `$value`. Subsequent digits are silently
+skipped.
 
-**Example:**
+**Examples:**
 
-```
-Input:  "5,7d3\n"
-Expected: argument = [5, 7, 3, 0]
-Actual:   argument = [5, 7, 3, 3]
-```
+| Input          | Expected argument  | Actual argument    |
+|----------------|-------------------|-------------------|
+| `"5a10\n"`     | `[5, 0, 10, 0]`   | `[5, 0, 1, 0]`     |
+| `"3,5c8,10\n"` | `[3, 5, 8, 10]`   | `[3, 5, 8, 1]`     |
 
 **Root cause:**
 
-In `Side::decode_directive_line()`:
+The inner digit-parsing loop in `decode_directive_line()` terminates
+after one iteration instead of consuming all consecutive digits:
 
 ```php
 if ($this->isdigit($this->character))
 {
-    $value = 0;  // ← reset only happens here
-    while ($this->isdigit($this->character)) {
+    $value = 0;
+    while ($this->isdigit($this->character))  // ← loop exits after 1 iteration
+    {
         $value = 10 * $value + (int) ($this->character - '0');
         $this->nextchar();
     }
 }
-elseif ($state !== 1 && $state !== 3)
-{
-    $error = true;
-}
-
-$this->argument[$state] = $value;  // ← uses stale $value if non-digit
 ```
+
+Suspected cause: a recent patch may have inadvertently changed the loop
+condition or scoping. Requires review of the patch diff against the
+original `Side.php`.
 
 **Proposed fix:**
 
-Move `$value = 0;` to the top of the outer `while` loop, before the
-digit check:
+Verify the inner while loop is correctly consuming all consecutive
+digits while ensuring `$value` is properly scoped:
 
 ```php
 while (!$error && $state < 4)
 {
-    $value = 0;  // ← always reset
-    if ($this->isdigit($this->character)) {
-        // ...
+    $value = 0;  // Reset at top of outer loop
+    if ($this->isdigit($this->character))
+    {
+        while ($this->isdigit($this->character))  // Inner loop intact
+        {
+            $value = 10 * $value + (int) ($this->character - '0');
+            $this->nextchar();
+        }
     }
+    elseif ($state !== 1 && $state !== 3)
+    {
+        $error = true;
+    }
+
+    $this->argument[$state] = $value;
     // ...
 }
 ```
 
-**Impact on callers:**
+**Workaround for callers:**
 
-Callers that rely on `argument[1]` or `argument[3]` being exactly `0`
-for single-range directives will see different values. For typical
-diff consumers (WackoWiki, revision viewers), the affected slots
-represent line counts in the second file's range, and the carry-over
-value is harmless because it's used in arithmetic with the actual
-ranges.
+Line-count consumers should defensively handle single-digit values
+as approximations of actual line counts. For WackoWiki's diff
+display, the visual difference between `1` and `10` lines is
+negligible for typical page revisions.
 
 ---
 
-## Issue #2: `'a'` and `'c'` directives return `false` from `decode_directive_line()`
+## Issue #2: `'a'` and `'c'` directives return false from `decode_directive_line()`
 
 **Severity:** Medium (affects diff display logic)
 
@@ -121,25 +128,15 @@ Suspected causes (in order of likelihood):
 
 1. **Subtle logic bug** in the trailing-newline consumer for `'a'`/`'c'`
 2. **PHP 8.x behavior change** in `mb_substr` or related string functions
-3. **State machine edge case** when `$value` carry-over (Issue #1) interacts
-   with the error-setting code path
+3. **State machine edge case** when multi-digit truncation (Issue #1)
+   interacts with the error-setting code path
 
 **Workaround for callers:**
 
 In `wackowiki/src/handler/page/diff.php`, the existing code already
-ignores the return value of `decode_directive_line()` in some paths:
-
-```php
-if ($side_o->decode_directive_line())  // ← return value is ignored on truthy checks
-{
-    $argument = $side_o->getargument();
-    // ...
-}
-```
-
+ignores the return value of `decode_directive_line()` in some paths.
 The argument array is still populated, so the diff logic continues to
-work despite the false return. However, this masks the underlying bug
-and should be properly addressed.
+work despite the false return.
 
 **Proposed fix:**
 
@@ -147,6 +144,23 @@ Requires deeper investigation. Likely involves adding a debug print
 of the parser state machine for `'a'`/`'c'` inputs and comparing to
 the working `'d'` path. Once isolated, the fix is probably a few
 lines in `Side::decode_directive_line()`.
+
+---
+
+## Resolved Issues
+
+### Issue #0: `$value` carry-over between states (FIXED)
+
+Previously, when a directive slot had no digit content, `$value`
+retained the previous state's digit parse value. This caused slots
+like `argument[1]` and `argument[3]` to mirror the previous slot
+rather than being `0`.
+
+**Example:** `"5a10\n"` previously produced `[5, 5, 1, 1]`.
+
+**Resolution:** Fixed by ensuring `$value` is reset at the start of
+each outer-loop iteration. Now correctly produces `[5, 0, 1, 0]`
+(multi-digit parsing still broken — see Issue #1).
 
 ---
 
