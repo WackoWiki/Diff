@@ -64,19 +64,19 @@ require_once 'vendor/autoload.php';
 use Diff\Diff;
 use Diff\DiffFormatter;
 
-$fromLines = [
-    "The quick brown fox",
-    "jumps over the lazy dog",
+$from_lines = [
+	"The quick brown fox",
+	"jumps over the lazy dog",
 ];
 
-$toLines = [
-    "The quick brown fox",
-    "jumps over the lazy cat",
-    "and runs away",
+$to_lines = [
+	"The quick brown fox",
+	"jumps over the lazy cat",
+	"and runs away",
 ];
 
 // Compute the diff
-$diff = new Diff($fromLines, $toLines);
+$diff = new Diff($from_lines, $to_lines);
 
 // Format as classic GNU diff output
 $formatter = new DiffFormatter();
@@ -113,14 +113,16 @@ use Diff\Engine\DiffOpChange;
 
 $diff = new Diff(['a', 'b', 'c'], ['a', 'X', 'c']);
 
-foreach ($diff->edits as $edit) {
-    echo match (true) {
-        $edit instanceof DiffOpCopy   => "COPY: " . implode(', ', $edit->orig) . PHP_EOL,
-        $edit instanceof DiffOpAdd    => "ADD: "  . implode(', ', $edit->final) . PHP_EOL,
-        $edit instanceof DiffOpDelete => "DEL: "  . implode(', ', $edit->orig) . PHP_EOL,
-        $edit instanceof DiffOpChange => "CHANGE: -[" . implode(', ', $edit->orig) .
-                                         "] +[" . implode(', ', $edit->final) . "]" . PHP_EOL,
-    };
+foreach ($diff->edits as $edit)
+{
+	echo match (true)
+	{
+		$edit instanceof DiffOpCopy   => "COPY: " . implode(', ', $edit->orig) . PHP_EOL,
+		$edit instanceof DiffOpAdd    => "ADD: "  . implode(', ', $edit->final) . PHP_EOL,
+		$edit instanceof DiffOpDelete => "DEL: "  . implode(', ', $edit->orig) . PHP_EOL,
+		$edit instanceof DiffOpChange => "CHANGE: -[" . implode(', ', $edit->orig) .
+										 "] +[" . implode(', ', $edit->final) . "]" . PHP_EOL,
+	};
 }
 ```
 
@@ -144,70 +146,77 @@ use Diff\Side;
 use Diff\Diff;
 use Diff\DiffFormatter;
 
-$textA = "The quick brown fox";
-$textB = "The slow brown fox";
+$text_a = "The quick brown fox";
+$text_b = "The slow brown fox";
 
-$sideA = new Side($textA);
-$sideB = new Side($textB);
+$side_a = new Side($text_a);
+$side_b = new Side($text_b);
 
 // Split into words for comparison
-$bodyA = '';
-$sideA->split_file_into_words($bodyA);
+$body_a = '';
+$side_a->split_file_into_words($body_a);
 
-$bodyB = '';
-$sideB->split_file_into_words($bodyB);
+$body_b = '';
+$side_b->split_file_into_words($body_b);
 
 // Compute word-level diff
-$diff = new Diff(explode("\n", $bodyA), explode("\n", $bodyB));
+$diff = new Diff(explode("\n", $body_a), explode("\n", $body_b));
 
 // Format and decode for inline markup
 $formatter = new DiffFormatter();
 $output = new Side($formatter->format($diff));
 
-$resyncLeft = $resyncRight = 0;
-$outputText = '';
-$countTotalRight = $sideB->getposition();
-$sideA->init();
-$sideB->init();
+$resync_left  = 0;
+$resync_right = 0;
+$output_text  = '';
+$count_total_right = $side_b->getposition();
+$side_a->init();
+$side_b->init();
 
-while (!$output->isend()) {
-    $output->skip_line();
+while (!$output->isend())
+{
+	$output->skip_line();
 
-    if ($output->decode_directive_line()) {
-        $argument = $output->getargument();
-        $letter   = $output->getdirective();
+	if ($output->decode_directive_line())
+	{
+		$argument = $output->getargument();
+		$letter   = $output->getdirective();
 
-        $resyncLeft  = match ($letter) {
-            'a' => $argument[0],
-            'd', 'c' => $argument[0] - 1,
-        };
-        $resyncRight = match ($letter) {
-            'a' => $argument[2] - 1,
-            'd' => $argument[2],
-            'c' => $argument[2] - 1,
-        };
+		$resync_left = match ($letter)
+		{
+			'a'        => $argument[0],
+			'd', 'c'   => $argument[0] - 1,
+		};
+		$resync_right = match ($letter)
+		{
+			'a'  => $argument[2] - 1,
+			'd'  => $argument[2],
+			'c'  => $argument[2] - 1,
+		};
 
-        $sideA->skip_until_ordinal($resyncLeft);
-        $sideB->copy_until_ordinal($resyncRight, $outputText);
+		$side_a->skip_until_ordinal($resync_left);
+		$side_b->copy_until_ordinal($resync_right, $output_text);
 
-        if ($letter === 'd' || $letter === 'c') {
-            $sideA->copy_whitespace($outputText);
-            $outputText .= '**[DELETED]** ';
-            $sideA->copy_word($outputText);
-            $sideA->copy_until_ordinal($argument[1], $outputText);
-        }
+		if ($letter === 'd' || $letter === 'c')
+		{
+			$side_a->copy_whitespace($output_text);
+			$output_text .= '**[DELETED]** ';
+			$side_a->copy_word($output_text);
+			$side_a->copy_until_ordinal($argument[1], $output_text);
+		}
 
-        if ($letter === 'a' || $letter === 'c') {
-            $sideB->copy_whitespace($outputText);
-            $outputText .= ' **[INSERTED]** ';
-            $sideB->copy_word($outputText);
-            $sideB->copy_until_ordinal($argument[3], $outputText);
-        }
-    }
+		if ($letter === 'a' || $letter === 'c')
+		{
+			$side_b->copy_whitespace($output_text);
+			$output_text .= ' **[INSERTED]** ';
+			$side_b->copy_word($output_text);
+			$side_b->copy_until_ordinal($argument[3], $output_text);
+		}
+	}
 }
 
-$sideB->copy_until_ordinal($countTotalRight, $outputText);
-echo $outputText;
+$side_b->copy_until_ordinal($count_total_right, $output_text);
+echo $output_text;
 ```
 
 **Output:**
